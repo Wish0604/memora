@@ -398,6 +398,41 @@ class GraphEngine:
             current_layer = next_layer
         return list(visited)
 
+    def subgraph(self, node_ids: list[str]) -> dict:
+        valid_ids = set(nid for nid in node_ids if nid in self.g)
+        nodes_out = []
+        for nid in valid_ids:
+            data = self.g.nodes[nid]
+            nodes_out.append({
+                "id": nid,
+                "label": data.get("label", nid),
+                "type": data.get("type", "Node"),
+                "subgraph": data.get("subgraph", "customer"),
+                "properties": data.get("properties", {}),
+            })
+        edges_out = []
+        seen_edges = set()
+        for u in valid_ids:
+            for v in self.g.successors(u):
+                if v in valid_ids:
+                    key = (u, v)
+                    if key not in seen_edges:
+                        seen_edges.add(key)
+                        edge_data = self.g.get_edge_data(u, v)
+                        ed_type = "RELATED"
+                        if edge_data:
+                            first_val = next(iter(edge_data.values()), {})
+                            ed_type = first_val.get("type", "RELATED")
+                        edges_out.append({
+                            "source": u,
+                            "target": v,
+                            "type": ed_type,
+                        })
+        return {"nodes": nodes_out, "edges": edges_out}
+
+    def stats(self) -> dict:
+        return self.get_stats()
+
     def get_stats(self) -> dict:
 
         node_types = {}
