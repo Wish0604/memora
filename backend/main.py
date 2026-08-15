@@ -305,7 +305,7 @@ def api_docs_sync(use_live: bool = False):
 
 @app.get("/api/contradictions")
 def api_contradictions():
-    return {"contradictions": detect_structural_contradictions(STATE["engine"])}
+    return detect_structural_contradictions(STATE["engine"])
 
 
 @app.get("/api/analytics")

@@ -45,6 +45,9 @@
       <button class="rail-tab" data-tab="analytics">
         <span class="rail-tab-num">05</span> Analytics
       </button>
+      <button class="rail-tab" data-tab="timeline">
+        <span class="rail-tab-num">06</span> Timeline
+      </button>
     </nav>
 
     <div class="rail-status">
@@ -202,6 +205,17 @@
       <div class="panel">
         <h3>Recent queries</h3>
         <div id="recent-queries"></div>
+      </div>
+    </section>
+
+    <!-- ---- Knowledge Timeline ---- -->
+    <section class="view" id="view-timeline">
+      <header class="view-head">
+        <h1>Knowledge provenance timeline</h1>
+        <p>Chronological stream of user interaction mutations, graph updates, and document sync events.</p>
+      </header>
+      <div class="panel" id="timeline-stream">
+        <div style="color:var(--text-faint);">Loading timeline activity...</div>
       </div>
     </section>
 

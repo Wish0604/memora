@@ -49,10 +49,11 @@ class Answer:
     evidence_set: dict | None = None
 
 
-def detect_structural_contradictions(engine: GraphEngine) -> list[dict]:
+def detect_structural_contradictions(engine: GraphEngine) -> dict:
     """
-    Scans graph for Feature nodes with an open FeatureRequest ('new' or 'in_progress')
-    AND a ReleaseNote that already ships the feature.
+    Scans graph for Feature nodes with open FeatureRequests ('new', 'in_progress')
+    or customer Issues AND a ReleaseNote that ships the feature.
+    Returns categorized dict with deduplicated 'confirmed' and 'potential' lists.
     """
     if hasattr(engine, 'neo4j') and getattr(engine.neo4j, 'is_connected', False):
         try:
@@ -60,7 +61,8 @@ def detect_structural_contradictions(engine: GraphEngine) -> list[dict]:
         except Exception:
             pass
 
-    contradictions = []
+    confirmed = []
+    potential = []
     g = engine.g
 
     for n, data in g.nodes(data=True):
@@ -69,32 +71,104 @@ def detect_structural_contradictions(engine: GraphEngine) -> list[dict]:
 
         feat_key = data.get("label", n)
         open_frs = []
+        potential_frs = []
+        issues = []
         ship_releases = []
 
         for pred in g.predecessors(n):
             pdata = g.nodes[pred]
             ptype = pdata.get("type")
+            props = pdata.get("properties", {})
             if ptype == "FeatureRequest":
-                props = pdata.get("properties", {})
-                if props.get("status") in ("new", "in_progress"):
+                st = str(props.get("status", "")).lower()
+                if st in ("new", "in_progress", "submitted", "open"):
                     open_frs.append((pred, props))
+                elif st in ("reviewing", "backlog", "planned"):
+                    potential_frs.append((pred, props))
+            elif ptype == "Issue":
+                st = str(props.get("status", "")).lower()
+                if st in ("open", "in_progress", "investigating"):
+                    issues.append((pred, props))
             elif ptype == "ReleaseNote":
-                props = pdata.get("properties", {})
                 ship_releases.append((pred, props))
 
-        if open_frs and ship_releases:
-            for fr_id, fr_props in open_frs:
-                for rel_id, rel_props in ship_releases:
-                    contradictions.append({
-                        "feature_key": feat_key,
-                        "feature_request_id": fr_props.get("id", fr_id),
-                        "feature_title": fr_props.get("title", feat_key),
-                        "request_status": fr_props.get("status"),
-                        "release_title": rel_props.get("title", rel_id),
-                        "release_url": rel_props.get("url", rel_id),
-                        "description": f"FeatureRequest {fr_props.get('id')} ('{fr_props.get('title')}') is marked '{fr_props.get('status')}', but ReleaseNote '{rel_props.get('title')}' indicates it has already shipped."
-                    })
-    return contradictions
+        if ship_releases:
+            rel_items = [
+                {
+                    "node_id": r_id,
+                    "title": r_props.get("title", r_id),
+                    "url": r_props.get("url", r_id)
+                } for r_id, r_props in ship_releases
+            ]
+
+            # 1. Confirmed Contradiction: Open FR + Released Feature
+            if open_frs:
+                fr_items = [
+                    {
+                        "node_id": fr_id,
+                        "id": fr_props.get("id", fr_id),
+                        "title": fr_props.get("title", feat_key),
+                        "status": fr_props.get("status", "open"),
+                        "accounts": fr_props.get("accounts", [])
+                    } for fr_id, fr_props in open_frs
+                ]
+                affected_ids = [f"feature:{feat_key}"] + [fr_id for fr_id, _ in open_frs] + [r_id for r_id, _ in ship_releases]
+
+                confirmed.append({
+                    "id": f"cntr_conf_{feat_key}",
+                    "type": "confirmed",
+                    "severity": "HIGH",
+                    "feature_key": feat_key,
+                    "feature_title": feat_key,
+                    "open_feature_requests": fr_items,
+                    "shipped_in": rel_items,
+                    "affected_node_ids": affected_ids,
+                    "description": f"Feature '{feat_key}' has {len(open_frs)} open request(s) ({', '.join(f['id'] for f in fr_items)}), but Release Note '{rel_items[0]['title']}' indicates it has already shipped."
+                })
+
+            # 2. Potential Contradiction: Active Issue on Released Feature OR Backlog FR
+            elif issues or potential_frs:
+                iss_items = [
+                    {
+                        "node_id": iss_id,
+                        "id": iss_props.get("id", iss_id),
+                        "title": iss_props.get("title", feat_key),
+                        "status": iss_props.get("status", "open"),
+                        "account": iss_props.get("account_name")
+                    } for iss_id, iss_props in issues
+                ]
+                pfr_items = [
+                    {
+                        "node_id": fr_id,
+                        "id": fr_props.get("id", fr_id),
+                        "title": fr_props.get("title", feat_key),
+                        "status": fr_props.get("status", "reviewing"),
+                        "accounts": fr_props.get("accounts", [])
+                    } for fr_id, fr_props in potential_frs
+                ]
+                affected_ids = [f"feature:{feat_key}"] + [iss_id for iss_id, _ in issues] + [fr_id for fr_id, _ in potential_frs] + [r_id for r_id, _ in ship_releases]
+
+                desc = f"Feature '{feat_key}' has {len(issues)} active issue(s) reported despite being shipped in '{rel_items[0]['title']}'." if issues else f"Feature '{feat_key}' has {len(potential_frs)} reviewing/backlog request(s) matching release note '{rel_items[0]['title']}'."
+
+                potential.append({
+                    "id": f"cntr_pot_{feat_key}",
+                    "type": "potential",
+                    "severity": "MEDIUM",
+                    "feature_key": feat_key,
+                    "feature_title": feat_key,
+                    "active_issues": iss_items,
+                    "potential_feature_requests": pfr_items,
+                    "shipped_in": rel_items,
+                    "affected_node_ids": affected_ids,
+                    "description": desc
+                })
+
+    return {
+        "confirmed": confirmed,
+        "potential": potential,
+        "total_confirmed": len(confirmed),
+        "total_potential": len(potential)
+    }
 
 
 class Reasoner:
@@ -105,7 +179,8 @@ class Reasoner:
 
     def answer(self, query: str, node_type_hints: list[str] | None = None) -> Answer:
         retrieved = self.retriever.hybrid_retrieve(query, top_k=8, node_types=node_type_hints)
-        all_contradictions = detect_structural_contradictions(self.engine)
+        contradictions_dict = detect_structural_contradictions(self.engine)
+        all_contradictions = contradictions_dict.get("confirmed", []) + contradictions_dict.get("potential", [])
 
         evidence_set = self.evidence_builder.build_evidence_set(
             query=query,
