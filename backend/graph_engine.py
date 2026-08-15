@@ -520,13 +520,54 @@ class GraphEngine:
             t = data.get("type", "unknown")
             edge_types[t] = edge_types.get(t, 0) + 1
 
-        return {
-            "total_nodes": self.g.number_of_nodes(),
-            "total_edges": self.g.number_of_edges(),
-            "node_counts": node_types,
-            "edge_counts": edge_types,
-            "engine": "Embedded NetworkX + SQLite"
-        }
+    def most_requested_features(self, top_k: int = 10) -> list[dict]:
+        counts = {}
+        for nid, data in self.g.nodes(data=True):
+            if data.get("type") == "Feature":
+                in_edges = self.g.in_edges(nid, data=True)
+                counts[nid] = {
+                    "feature": data.get("label", str(nid)),
+                    "count": len([e for e in in_edges if e[2].get("type") in ("about_feature", "requested_feature")])
+                }
+        sorted_feats = sorted(counts.values(), key=lambda x: x["count"], reverse=True)
+        return sorted_feats[:top_k]
+
+    def issue_counts_by_tier(self) -> dict:
+        tier_counts = {"enterprise": 0, "growth": 0, "starter": 0, "other": 0}
+        for nid, data in self.g.nodes(data=True):
+            if data.get("type") == "Issue":
+                # Find account linked to this issue
+                in_edges = self.g.in_edges(nid, data=True)
+                acc_tier = "other"
+                for src, _, edata in in_edges:
+                    if src.startswith("account:"):
+                        acc_data = self.g.nodes.get(src, {})
+                        acc_tier = acc_data.get("properties", {}).get("tier", "other").lower()
+                        break
+                tier_counts[acc_tier] = tier_counts.get(acc_tier, 0) + 1
+        return tier_counts
+
+    def arr_impact_by_feature(self) -> list[dict]:
+        impacts = {}
+        for nid, data in self.g.nodes(data=True):
+            if data.get("type") == "Feature":
+                f_label = data.get("label", str(nid))
+                total_arr = 0
+                # Trace FRs connected to feature
+                in_edges = self.g.in_edges(nid, data=True)
+                for fr_id, _, _ in in_edges:
+                    if fr_id.startswith("fr:"):
+                        # Trace accounts connected to FR
+                        fr_in_edges = self.g.in_edges(fr_id, data=True)
+                        for acc_id, _, _ in fr_in_edges:
+                            if acc_id.startswith("account:"):
+                                acc_props = self.g.nodes.get(acc_id, {}).get("properties", {})
+                                arr = acc_props.get("arr", 0) or acc_props.get("arr_value", 0)
+                                if isinstance(arr, (int, float)):
+                                    total_arr += arr
+                impacts[f_label] = total_arr
+        sorted_impacts = sorted([{"feature": k, "arr_impact": v} for k, v in impacts.items()], key=lambda x: x["arr_impact"], reverse=True)
+        return sorted_impacts
 
 
 # ---------------------------------------------------------------------------

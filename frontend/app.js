@@ -598,31 +598,62 @@ async function loadContradictions() {
 // ============================= Docs sync =============================
 async function loadDocsTab() {
   const tbody = document.querySelector('#docs-table tbody');
-  tbody.innerHTML = `<tr><td colspan="4">Run "Trigger sync" to fetch live pages.</td></tr>`;
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="4">Loading synced documentation pages...</td></tr>`;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/docs`);
+    const data = await res.json();
+    if (!data.pages || !data.pages.length) {
+      tbody.innerHTML = `<tr><td colspan="4">No pages synced. Click "Trigger sync" to fetch live docs.</td></tr>`;
+      return;
+    }
+    renderDocsTable(data.pages);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color:var(--accent-rose)">Failed to load doc pages: ${escapeHtml(String(e))}</td></tr>`;
+  }
+}
+
+function renderDocsTable(pages) {
+  const tbody = document.querySelector('#docs-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = pages.map(p => {
+    const isRel = p.source === 'releases' || (p.url && p.url.includes('releases.')) || p.type === 'ReleaseNote';
+    const featuresHtml = (p.canonical_features && p.canonical_features.length)
+      ? p.canonical_features.map(f => `<span class="cite" style="margin-right:4px;">${escapeHtml(f)}</span>`).join('')
+      : '—';
+    return `
+      <tr>
+        <td><span class="kg-count-badge" style="background:${isRel ? 'rgba(167,139,250,0.15)' : 'rgba(94,234,212,0.15)'}; color:${isRel ? 'var(--accent-violet)' : 'var(--accent-cyan)'}">${isRel ? 'releases' : 'docs'}</span></td>
+        <td>
+          <a href="${escapeHtml(p.url)}" target="_blank" style="color:var(--accent-cyan); text-decoration:none; font-weight:500;">
+            ${escapeHtml(p.title || p.url)}
+          </a>
+          <div style="font-size:11px; color:var(--text-faint); font-family:var(--font-mono); margin-top:2px;">${escapeHtml(p.url)}</div>
+        </td>
+        <td style="font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim);">${escapeHtml(typeof p.last_fetched === 'number' ? new Date(p.last_fetched * 1000).toLocaleTimeString() : String(p.last_fetched))}</td>
+        <td>${featuresHtml}</td>
+      </tr>`;
+  }).join('');
 }
 
 document.getElementById('sync-btn').addEventListener('click', async () => {
   const btn = document.getElementById('sync-btn');
-  btn.textContent = 'Syncing…';
+  btn.textContent = 'Syncing live pages…';
+  btn.disabled = true;
   try {
     const res = await fetch(`${API_BASE}/api/docs/sync`, { method: 'POST' });
     const data = await res.json();
-    const tbody = document.querySelector('#docs-table tbody');
-    if (!data.urls || !data.urls.length) {
-      tbody.innerHTML = `<tr><td colspan="4">No pages synced.</td></tr>`;
+    if (data.pages && data.pages.length) {
+      renderDocsTable(data.pages);
     } else {
-      tbody.innerHTML = data.urls.map(u => `
-        <tr>
-          <td>${u.includes('releases.') ? 'releases' : 'docs'}</td>
-          <td>${u}</td>
-          <td>just now</td>
-          <td>—</td>
-        </tr>`).join('');
+      loadDocsTab();
     }
   } catch (e) {
-    document.querySelector('#docs-table tbody').innerHTML = `<tr><td colspan="4">Sync failed: ${escapeHtml(String(e))}</td></tr>`;
+    document.querySelector('#docs-table tbody').innerHTML = `<tr><td colspan="4" style="color:var(--accent-rose)">Sync failed: ${escapeHtml(String(e))}</td></tr>`;
   }
   btn.textContent = 'Trigger sync';
+  btn.disabled = false;
 });
 
 // ============================= Analytics =============================

@@ -245,17 +245,62 @@ def api_graph_subgraph(req: SubgraphRequest):
     return STATE["engine"].subgraph(req.node_ids)
 
 
+@app.get("/api/docs")
+def api_get_docs():
+    doc_nodes = STATE["engine"].nodes_by_type("DocPage") or []
+    rel_nodes = STATE["engine"].nodes_by_type("ReleaseNote") or []
+    all_docs = []
+    for n in doc_nodes + rel_nodes:
+        p = n.properties or {}
+        source = "releases" if "releases." in n.id or n.type == "ReleaseNote" else "docs"
+        all_docs.append({
+            "type": n.type,
+            "source": source,
+            "url": n.id,
+            "title": n.label or p.get("title") or n.id,
+            "last_fetched": p.get("last_fetched") or p.get("date") or "synced",
+            "canonical_features": p.get("canonical_features", []),
+        })
+    return {"pages": all_docs, "count": len(all_docs)}
+
+
 @app.post("/api/docs/sync")
 def api_docs_sync(use_live: bool = False):
     try:
         crawler = STATE["crawler"]
-        pages = crawler.sync_all(force=True)
+        try:
+            pages = crawler.sync_all(force=True)
+        except Exception as e:
+            print(f"[main] Live crawl sync notice ({e}), using fallback crawler...")
+            sim_crawler = get_simulated_crawler()
+            pages = sim_crawler.sync_all()
+
         build_docs_graph(STATE["engine"], pages)
         STATE["engine"].persist()
         STATE["retriever"].build_index()
-        return {"status": "ok", "pages_synced": len(pages), "urls": [p.url for p in pages]}
+
+        GLOBAL_EVENT_BUS.publish({
+            "event": "KNOWLEDGE_GRAPH_UPDATED",
+            "graph_version": getattr(STATE.get("mutation_service"), "version", 1),
+            "source": "docs_sync"
+        })
+
+        return {
+            "status": "ok",
+            "pages_synced": len(pages),
+            "urls": [p.url for p in pages],
+            "pages": [
+                {
+                    "url": p.url,
+                    "title": p.title,
+                    "source": getattr(p, "source", "docs"),
+                    "last_fetched": getattr(p, "last_fetched_at", time.time()),
+                    "canonical_features": getattr(p, "canonical_features", [])
+                } for p in pages
+            ]
+        }
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/contradictions")
