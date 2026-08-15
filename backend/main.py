@@ -17,8 +17,10 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -29,6 +31,11 @@ from retriever import HybridRetriever
 from query_router import route
 from reasoner import Reasoner, detect_structural_contradictions
 from usage_signals import UsageSignals, QueryLogEntry
+
+from knowledge.extractor import KnowledgeExtractor
+from knowledge.mutation_service import MutationService
+from knowledge.schemas import MutationOp, MutationOpType, ProvenanceInfo
+from events.event_bus import GLOBAL_EVENT_BUS
 
 STATE: dict = {}
 
@@ -49,11 +56,12 @@ def rebuild_everything(use_live_docs: bool = True):
     except Exception as e:
         print(f"[main] Neo4j initialization notice: {e}")
 
+    # Crawl docs
     pages = []
     if use_live_docs:
         try:
             print("[main] Attempting live crawler sync for docs.flytbase.com and releases.flytbase.com...")
-            crawler = DocsCrawler(simulate=False)
+            crawler = DocsCrawler()
             pages = crawler.sync_all()
             print(f"[main] Live crawler fetched {len(pages)} pages.")
         except Exception as e:
@@ -77,11 +85,16 @@ def rebuild_everything(use_live_docs: bool = True):
     reasoner = Reasoner(engine, retriever)
     usage = UsageSignals()
 
+    mutation_service = MutationService(engine, event_bus=GLOBAL_EVENT_BUS, retriever=retriever)
+    extractor = KnowledgeExtractor()
+
     STATE["engine"] = engine
     STATE["retriever"] = retriever
     STATE["reasoner"] = reasoner
     STATE["usage"] = usage
     STATE["crawler"] = crawler
+    STATE["mutation_service"] = mutation_service
+    STATE["extractor"] = extractor
 
 
 
@@ -103,6 +116,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 class QueryRequest(BaseModel):
     query: str
+    conversation_id: str | None = None
 
 
 class SubgraphRequest(BaseModel):
@@ -115,6 +129,21 @@ class SubgraphRequest(BaseModel):
 @app.post("/api/query")
 def api_query(req: QueryRequest):
     start = time.time()
+
+    # 1. Run Knowledge Extraction Pipeline on user interaction
+    extracted_ops = STATE["extractor"].extract(req.query, conversation_id=req.conversation_id)
+    mutation_info = None
+    if extracted_ops:
+        mut_res = STATE["mutation_service"].execute_operations(extracted_ops)
+        mutation_info = {
+            "status": mut_res.status,
+            "graph_version": mut_res.graph_version,
+            "created_nodes": mut_res.created_nodes,
+            "created_edges": mut_res.created_edges,
+            "message": mut_res.message,
+        }
+
+    # 2. Route & Reason over current Graph State
     routed = route(req.query)
 
     all_answers = []
@@ -145,6 +174,59 @@ def api_query(req: QueryRequest):
         "evidence_set": combined_evidence[0] if len(combined_evidence) == 1 else combined_evidence,
         "graph_node_ids": combined_node_ids,
         "latency_ms": round(latency_ms, 1),
+        "mutation_info": mutation_info,
+    }
+
+
+@app.post("/api/knowledge/mutate")
+def api_knowledge_mutate(req: dict):
+    ops_raw = req.get("operations", [])
+    conv_id = req.get("conversation_id")
+    ops = []
+    for op_dict in ops_raw:
+        try:
+            op_type = MutationOpType(op_dict.get("type"))
+            ops.append(MutationOp(
+                op_type=op_type,
+                entity_type=op_dict.get("entity_type", "Issue"),
+                properties=op_dict.get("properties", {}),
+                relationships=op_dict.get("relationships", []),
+                provenance=ProvenanceInfo(conversation_id=conv_id, source_type="api")
+            ))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid operation payload: {e}")
+
+    res = STATE["mutation_service"].execute_operations(ops)
+    return {
+        "status": res.status,
+        "graph_version": res.graph_version,
+        "created_nodes": res.created_nodes,
+        "created_edges": res.created_edges,
+        "message": res.message,
+    }
+
+
+@app.get("/api/graph/events")
+async def api_graph_events():
+    queue = GLOBAL_EVENT_BUS.register_async_queue()
+    async def event_generator():
+        try:
+            while True:
+                data = await queue.get()
+                yield f"data: {json.dumps(data)}\n\n"
+        except Exception:
+            pass
+        finally:
+            GLOBAL_EVENT_BUS.unregister_async_queue(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/graph/version")
+def api_graph_version():
+    return {
+        "graph_version": STATE["mutation_service"].version,
+        "engine": STATE["engine"].__class__.__name__
     }
 
 

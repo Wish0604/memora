@@ -108,8 +108,16 @@ async function submitQuery(query) {
         </div>`).join('');
     }
 
+    let mutationHtml = '';
+    if (data.mutation_info && data.mutation_info.status === 'committed') {
+      mutationHtml = `
+        <div class="mutation-callout" style="margin-top:8px; padding:8px 12px; background:#064e3b; border-left:3px solid #34d399; border-radius:4px; font-size:0.85rem; color:#a7f3d0;">
+          <b>✓ Knowledge Persisted to Graph:</b> ${escapeHtml(data.mutation_info.message)}
+        </div>`;
+    }
+
     const meta = `Intent: ${data.intent} · ${data.latency_ms}ms · ${data.citations.length} citations`;
-    const el = addMessage('system', badgesHtml + bodyHtml + evidenceHtml + contradictionsHtml, meta);
+    addMessage('system', badgesHtml + bodyHtml + mutationHtml + contradictionsHtml + evidenceHtml, meta);
 
     lastGraphNodeIds = data.graph_node_ids || [];
     if (lastGraphNodeIds.length) renderGraphExplorer(lastGraphNodeIds);
@@ -642,12 +650,28 @@ async function loadAnalytics() {
     : '<div style="color:var(--text-faint); font-size:12.5px;">No queries logged yet — ask something in the Ask tab.</div>';
 }
 
-// ============================= Init =============================
+// ============================= Init & SSE =============================
+function initSSE() {
+  if (window.EventSource) {
+    const sse = new EventSource(`${API_BASE}/api/graph/events`);
+    sse.onmessage = (evt) => {
+      try {
+        const payload = JSON.parse(evt.data);
+        if (payload.event === 'KNOWLEDGE_GRAPH_UPDATED') {
+          console.log('[SSE] KNOWLEDGE_GRAPH_UPDATED Event received:', payload);
+          if (typeof loadFullGraph === 'function') loadFullGraph();
+        }
+      } catch (e) {}
+    };
+  }
+}
+
 (async function init() {
+  initSSE();
   try {
     const res = await fetch(`${API_BASE}/api/graph/stats`);
     const stats = await res.json();
     document.getElementById('rail-node-count').innerHTML =
-      `<span class="dot dot-live"></span> ${stats.node_count} nodes indexed`;
+      `<span class="dot dot-live"></span> ${stats.total_nodes || stats.node_count} nodes indexed`;
   } catch (e) { /* backend not reachable yet — non-fatal */ }
 })();

@@ -104,6 +104,10 @@ class HybridRetriever:
         self.vectorizer = TfidfVectorizer(stop_words="english", max_features=20000, ngram_range=(1, 2))
         self.matrix = self.vectorizer.fit_transform(corpus)
 
+    def update_incremental(self, mutated_node_ids: list[str] | None = None):
+        """Incremental update trigger called by MutationService when nodes mutate."""
+        self.build_index()
+
     def vector_search(self, query: str, top_k: int | None = None, node_types: list[str] | None = None) -> list[RetrievedItem]:
         if self.vectorizer is None or self.matrix is None:
             return []

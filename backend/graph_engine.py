@@ -340,7 +340,12 @@ class GraphEngine:
             )
         self._conn.commit()
 
-    def add_node(self, node: Node):
+    def add_node(self, node_or_id: Node | str, label: str = "", node_type: str = "Node", subgraph: str = "customer", properties: dict = None):
+        if isinstance(node_or_id, Node):
+            node = node_or_id
+        else:
+            node = Node(id=node_or_id, type=node_type, label=label, subgraph=subgraph, properties=properties or {})
+
         self.g.add_node(
             node.id,
             type=node.type,
@@ -348,9 +353,32 @@ class GraphEngine:
             subgraph=node.subgraph,
             properties=node.properties,
         )
+        if hasattr(self, 'neo4j') and getattr(self.neo4j, 'is_connected', False):
+            try:
+                with self.neo4j.driver.session() as session:
+                    session.run(
+                        f"MERGE (n:{node.type} {{id: $id}}) SET n += $props, n.name = $label, n.title = $label",
+                        id=node.id, props=node.properties, label=node.label
+                    )
+            except Exception:
+                pass
 
-    def add_edge(self, edge: Edge):
+    def add_edge(self, edge_or_src: Edge | str, dst: str = "", rel_type: str = "RELATED", properties: dict = None):
+        if isinstance(edge_or_src, Edge):
+            edge = edge_or_src
+        else:
+            edge = Edge(src=edge_or_src, dst=dst, type=rel_type, properties=properties or {})
+
         self.g.add_edge(edge.src, edge.dst, type=edge.type, properties=edge.properties)
+        if hasattr(self, 'neo4j') and getattr(self.neo4j, 'is_connected', False):
+            try:
+                with self.neo4j.driver.session() as session:
+                    session.run(
+                        f"MATCH (a {{id: $src}}), (b {{id: $dst}}) MERGE (a)-[r:{edge.type}]->(b) SET r += $props",
+                        src=edge.src, dst=edge.dst, props=edge.properties
+                    )
+            except Exception:
+                pass
 
     def nodes_by_type(self, node_type: str) -> list[Node]:
         results = []
@@ -429,6 +457,9 @@ class GraphEngine:
                             "type": ed_type,
                         })
         return {"nodes": nodes_out, "edges": edges_out}
+
+    def has_node(self, node_id: str) -> bool:
+        return node_id in self.g
 
     def get_full_graph(self, max_nodes: int = 5000) -> dict:
         nodes_out = []
