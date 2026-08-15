@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+ROOT_DIR = BASE_DIR.parent
+DATA_DIR = (ROOT_DIR / "dataset") if (ROOT_DIR / "dataset").exists() else (BASE_DIR / "data")
 CACHE_DIR = BASE_DIR / "cache"
 DB_PATH = BASE_DIR / "cache" / "graph.sqlite"
 

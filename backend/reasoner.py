@@ -35,6 +35,9 @@ if GEMINI_API_KEY:
             GEMINI_CLIENT = None
 
 
+from evidence import EvidenceBuilder, EvidenceSet, EvidenceItem
+
+
 @dataclass
 class Answer:
     query: str
@@ -43,6 +46,7 @@ class Answer:
     contradictions: list[dict]
     context_node_ids: list[str]
     model_used: str
+    evidence_set: dict | None = None
 
 
 def detect_structural_contradictions(engine: GraphEngine) -> list[dict]:
@@ -50,7 +54,6 @@ def detect_structural_contradictions(engine: GraphEngine) -> list[dict]:
     Scans graph for Feature nodes with an open FeatureRequest ('new' or 'in_progress')
     AND a ReleaseNote that already ships the feature.
     """
-    # If Neo4j engine is active, try calling its Cypher contradiction method
     if hasattr(engine, 'neo4j') and getattr(engine.neo4j, 'is_connected', False):
         try:
             return engine.neo4j.detect_contradictions()
@@ -98,15 +101,28 @@ class Reasoner:
     def __init__(self, engine: GraphEngine, retriever):
         self.engine = engine
         self.retriever = retriever
+        self.evidence_builder = EvidenceBuilder(engine)
 
     def answer(self, query: str, node_type_hints: list[str] | None = None) -> Answer:
-        retrieval = self.retriever.retrieve(query, node_type_hints=node_type_hints)
-        citations = retrieval.citations
-        context_node_ids = retrieval.graph_node_ids
+        retrieved = self.retriever.hybrid_retrieve(query, top_k=8, node_types=node_type_hints)
         all_contradictions = detect_structural_contradictions(self.engine)
 
-        # Build clean prompt context
-        context_block = "\n".join([f"- [{c['type']}:{c['id']}] {c['snippet']}" for c in citations])
+        evidence_set = self.evidence_builder.build_evidence_set(
+            query=query,
+            intent="hybrid",
+            retrieved_result=retrieved,
+            contradictions=all_contradictions,
+        )
+
+        citations = evidence_set.citations
+        context_node_ids = retrieved.get("node_ids_for_subgraph", [])
+
+        # Build clean prompt context from structured evidence items
+        context_lines = []
+        for ev in evidence_set.primary_evidence:
+            context_lines.append(f"- [{ev.source_type}:{ev.source_id}] (Source: {ev.source_file_or_url}) {ev.snippet}")
+
+        context_block = "\n".join(context_lines)
         contradiction_block = json.dumps(all_contradictions, indent=2) if all_contradictions else "None"
 
         # If Gemini API client available, synthesize response via Gemini
@@ -114,12 +130,12 @@ class Reasoner:
             try:
                 prompt = f"""
 You are a Graph-Based Knowledge-Base Assistant for the FlytBase drone autonomy platform.
-Answer the user query thoroughly based strictly on the provided Customer Records and Product Documentation.
+Answer the user query thoroughly based strictly on the provided Evidence Items (Customer Records and Product Documentation).
 
 User Query: "{query}"
 
-Retrieved Context & Citations:
-{context_block if context_block else "No relevant context found."}
+Retrieved Structured Evidence:
+{context_block if context_block else "No relevant evidence found."}
 
 Detected Contradictions:
 {contradiction_block}
@@ -145,20 +161,21 @@ INSTRUCTIONS:
                 return Answer(
                     query=query,
                     text=answer_text,
-                    citations=[c["id"] for c in citations],
+                    citations=citations,
                     contradictions=all_contradictions,
                     context_node_ids=context_node_ids,
-                    model_used=f"Google Gemini ({GEMINI_MODEL})"
+                    model_used=f"Google Gemini ({GEMINI_MODEL})",
+                    evidence_set=evidence_set.to_dict(),
                 )
             except Exception as e:
                 print(f"[Reasoner] Gemini generation error ({e}). Using citation-preserving fallback.")
 
-        # Extractive Fallback Synthesizer
+        # Extractive Fallback Synthesizer using EvidenceSet
         sections = []
-        if citations:
-            sections.append("### Retrieved Context & Citations\n")
-            for c in citations[:6]:
-                sections.append(f"- **[{c['type']}: {c['id']}]** {c['snippet']}")
+        if evidence_set.primary_evidence:
+            sections.append("### Retrieved Evidence & Citations\n")
+            for ev in evidence_set.primary_evidence[:6]:
+                sections.append(f"- **[{ev.source_type}: `{ev.source_id}`]** ({ev.source_file_or_url})\n  {ev.snippet}")
         else:
             sections.append("I do not have enough information in the customer data corpus or product documentation to answer this question.")
 
@@ -171,8 +188,9 @@ INSTRUCTIONS:
         return Answer(
             query=query,
             text=full_text,
-            citations=[c["id"] for c in citations],
+            citations=citations,
             contradictions=all_contradictions,
             context_node_ids=context_node_ids,
-            model_used="Grounded Graph Synthesizer (Extractive)"
+            model_used="Grounded Graph Synthesizer (Extractive)",
+            evidence_set=evidence_set.to_dict(),
         )

@@ -126,6 +126,7 @@ def api_query(req: QueryRequest):
     combined_citations = list({c for a in all_answers for c in a.citations})
     combined_contradictions = [c for a in all_answers for c in a.contradictions]
     combined_node_ids = list({n for a in all_answers for n in a.context_node_ids})
+    combined_evidence = [a.evidence_set for a in all_answers if a.evidence_set]
 
     latency_ms = (time.time() - start) * 1000
     STATE["usage"].log(QueryLogEntry(
@@ -141,6 +142,7 @@ def api_query(req: QueryRequest):
         "answer": combined_text,
         "citations": combined_citations,
         "contradictions": combined_contradictions,
+        "evidence_set": combined_evidence[0] if len(combined_evidence) == 1 else combined_evidence,
         "graph_node_ids": combined_node_ids,
         "latency_ms": round(latency_ms, 1),
     }

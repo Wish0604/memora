@@ -92,7 +92,8 @@ class HybridRetriever:
     def build_index(self):
         self.chunks = []
         for node_type in SEARCHABLE_TYPES:
-            for node in self.engine.nodes_by_type(node_type):
+            nodes = self.engine.nodes_by_type(node_type) or []
+            for node in nodes:
                 text = node_to_text(node)
                 self.chunks.extend(_chunk_long_text(node.id, node.type, text))
 

@@ -69,18 +69,46 @@ async function submitQuery(query) {
     thinking.remove();
 
     let bodyHtml = renderAnswerHtml(data.answer || 'No answer returned.');
+    
+    // Phase 13 Retrieval Indicators
+    const hasCustomer = ['customer', 'both', 'contradiction', 'analytical'].includes(data.intent);
+    const hasDocs = ['docs', 'both', 'contradiction'].includes(data.intent);
+    
+    const badgesHtml = `
+      <div class="retrieval-badges" style="margin-bottom:8px; display:flex; gap:6px; flex-wrap:wrap;">
+        ${hasCustomer ? '<span class="badge-tag" style="background:#1e293b; color:#5eead4; border:1px solid #5eead455; padding:2px 8px; border-radius:12px; font-size:0.75rem;">✓ Customer Graph</span>' : ''}
+        ${hasDocs ? '<span class="badge-tag" style="background:#1e293b; color:#34d399; border:1px solid #34d39955; padding:2px 8px; border-radius:12px; font-size:0.75rem;">✓ Product Graph</span>' : ''}
+        <span class="badge-tag" style="background:#1e293b; color:#60a5fa; border:1px solid #60a5fa55; padding:2px 8px; border-radius:12px; font-size:0.75rem;">✓ Vector Search</span>
+      </div>`;
+
+    let evidenceHtml = '';
+    if (data.evidence_set && data.evidence_set.primary_evidence && data.evidence_set.primary_evidence.length) {
+      evidenceHtml = `
+        <details style="margin-top:10px; border:1px solid #334155; border-radius:6px; padding:8px; background:#0f172a;">
+          <summary style="cursor:pointer; color:#94a3b8; font-size:0.85rem; font-weight:600;">
+            🔍 Evidence Set (${data.evidence_set.primary_evidence.length} Primary Items)
+          </summary>
+          <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+            ${data.evidence_set.primary_evidence.slice(0, 5).map(ev => `
+              <div style="font-size:0.8rem; background:#1e293b; padding:6px 10px; border-radius:4px; border-left:3px solid ${ev.source_type === 'documentation' ? '#34d399' : '#60a5fa'};">
+                <span style="color:#f8fafc; font-weight:600;">[${escapeHtml(ev.source_id)}]</span>
+                <span style="color:#64748b; font-size:0.75rem;"> (${escapeHtml(ev.source_file_or_url)})</span>
+                <div style="color:#cbd5e1; margin-top:2px;">${escapeHtml(ev.snippet)}</div>
+              </div>`).join('')}
+          </div>
+        </details>`;
+    }
+
     let contradictionsHtml = '';
     if (data.contradictions && data.contradictions.length) {
       contradictionsHtml = data.contradictions.map(c => `
-        <div class="contradiction-callout">
-          ⚠ <b>${escapeHtml(c.feature)}</b> is still requested
-          (${c.open_feature_requests.map(r => r.id).join(', ')})
-          but already shipped in ${c.shipped_in.map(s => s.id.replace('https://', '')).join(', ')}
+        <div class="contradiction-callout" style="margin-top:8px; padding:8px; background:#450a0a; border-left:3px solid #f87171; border-radius:4px; font-size:0.85rem; color:#fca5a5;">
+          ⚠ <b>${escapeHtml(c.feature_title || c.feature_key || '')}</b> is marked '<em>${escapeHtml(c.request_status || '')}</em>' (${escapeHtml(c.feature_request_id || '')}) but already shipped in <b>${escapeHtml(c.release_title || '')}</b> (${escapeHtml(c.release_url || '')})
         </div>`).join('');
     }
 
-    const meta = `${data.intent} · ${data.latency_ms}ms · ${data.citations.length} citations`;
-    const el = addMessage('system', bodyHtml + contradictionsHtml, meta);
+    const meta = `Intent: ${data.intent} · ${data.latency_ms}ms · ${data.citations.length} citations`;
+    const el = addMessage('system', badgesHtml + bodyHtml + evidenceHtml + contradictionsHtml, meta);
 
     lastGraphNodeIds = data.graph_node_ids || [];
     if (lastGraphNodeIds.length) renderGraphExplorer(lastGraphNodeIds);

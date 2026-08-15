@@ -14,8 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+import hashlib
+import time
 from config import CUSTOMER_FILES, canonicalize_feature
 
+def _hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 # ---------------------------------------------------------------------------
 # Entity dataclasses
@@ -31,6 +35,10 @@ class Account:
     arr: int
     owner: str
     devices: list[str]
+    source_file: str = ""
+    source_row: int = 0
+    ingested_at: float = 0.0
+    content_hash: str = ""
 
 
 @dataclass
@@ -40,6 +48,10 @@ class Issue:
     category: str
     status: str
     title: str
+    source_file: str = ""
+    source_row: int = 0
+    ingested_at: float = 0.0
+    content_hash: str = ""
 
 
 @dataclass
@@ -52,6 +64,10 @@ class FeatureRequest:
     mentions: int
     revenue_impact: int
     canonical_feature: str | None = None
+    source_file: str = ""
+    source_row: int = 0
+    ingested_at: float = 0.0
+    content_hash: str = ""
 
 
 @dataclass
@@ -63,6 +79,10 @@ class Task:
     priority: str
     status: str
     due: str | None
+    source_file: str = ""
+    source_row: int = 0
+    ingested_at: float = 0.0
+    content_hash: str = ""
 
 
 @dataclass
@@ -73,6 +93,10 @@ class MeetingNote:
     attendees: list[str]
     date: str | None
     action_items: list[str]
+    source_file: str = ""
+    source_row: int = 0
+    ingested_at: float = 0.0
+    content_hash: str = ""
 
 
 @dataclass
@@ -133,7 +157,9 @@ def _split_list(s: str) -> list[str]:
 def parse_accounts(path: Path) -> dict[str, Account]:
     rows = _parse_md_table(path.read_text(encoding="utf-8"))
     accounts: dict[str, Account] = {}
-    for r in rows:
+    now = time.time()
+    for idx, r in enumerate(rows, start=1):
+        raw_str = f"{r.get('ID')}:{r.get('Name')}:{r.get('Tier')}"
         acc = Account(
             id=r["ID"],
             name=r["Name"],
@@ -144,6 +170,10 @@ def parse_accounts(path: Path) -> dict[str, Account]:
             arr=_money_to_int(r["ARR"]),
             owner=r["Owner"],
             devices=_split_list(r["Devices"]),
+            source_file=str(path.name),
+            source_row=idx,
+            ingested_at=now,
+            content_hash=_hash(raw_str),
         )
         accounts[acc.name] = acc
     return accounts
@@ -151,6 +181,7 @@ def parse_accounts(path: Path) -> dict[str, Account]:
 
 def parse_issues(path: Path) -> list[Issue]:
     rows = _parse_md_table(path.read_text(encoding="utf-8"))
+    now = time.time()
     return [
         Issue(
             id=r["ID"],
@@ -158,13 +189,18 @@ def parse_issues(path: Path) -> list[Issue]:
             category=r["Category"],
             status=r["Status"],
             title=r["Title"],
+            source_file=str(path.name),
+            source_row=idx,
+            ingested_at=now,
+            content_hash=_hash(f"{r['ID']}:{r['Title']}:{r['Status']}"),
         )
-        for r in rows
+        for idx, r in enumerate(rows, start=1)
     ]
 
 
 def parse_tasks(path: Path) -> list[Task]:
     rows = _parse_md_table(path.read_text(encoding="utf-8"))
+    now = time.time()
     return [
         Task(
             id=r["ID"],
@@ -174,19 +210,24 @@ def parse_tasks(path: Path) -> list[Task]:
             priority=r["Priority"],
             status=r["Status"],
             due=r.get("Due") or None,
+            source_file=str(path.name),
+            source_row=idx,
+            ingested_at=now,
+            content_hash=_hash(f"{r['ID']}:{r['Title']}:{r['Status']}"),
         )
-        for r in rows
+        for idx, r in enumerate(rows, start=1)
     ]
 
 
 def parse_feature_requests(path: Path) -> list[FeatureRequest]:
     rows = _parse_md_table(path.read_text(encoding="utf-8"))
+    now = time.time()
     out = []
-    for i, r in enumerate(rows, start=1):
+    for idx, r in enumerate(rows, start=1):
         title = r["Title"]
         out.append(
             FeatureRequest(
-                id=f"FR-{i:04d}",
+                id=f"FR-{idx:04d}",
                 title=title,
                 product_area=r["Product Area"],
                 status=r["Status"],
@@ -194,6 +235,10 @@ def parse_feature_requests(path: Path) -> list[FeatureRequest]:
                 mentions=int(r["Mentions"]),
                 revenue_impact=_money_to_int(r["Est. Revenue Impact"]),
                 canonical_feature=canonicalize_feature(title),
+                source_file=str(path.name),
+                source_row=idx,
+                ingested_at=now,
+                content_hash=_hash(f"{title}:{r['Status']}"),
             )
         )
     return out
@@ -207,7 +252,8 @@ def parse_meeting_notes(path: Path) -> list[MeetingNote]:
     text = path.read_text(encoding="utf-8")
     blocks = re.split(r"(?=^## MTG-)", text, flags=re.MULTILINE)
     notes: list[MeetingNote] = []
-    for block in blocks:
+    now = time.time()
+    for idx, block in enumerate(blocks, start=1):
         first_line = block.splitlines()[0] if block.splitlines() else ""
         m = _MTG_HEADER_RE.match(first_line)
         if not m:
@@ -240,6 +286,10 @@ def parse_meeting_notes(path: Path) -> list[MeetingNote]:
                 attendees=attendees,
                 date=date,
                 action_items=action_items,
+                source_file=str(path.name),
+                source_row=idx,
+                ingested_at=now,
+                content_hash=_hash(f"{mtg_id}:{topic}:{date}"),
             )
         )
     return notes

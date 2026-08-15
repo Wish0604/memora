@@ -365,6 +365,23 @@ class GraphEngine:
                 ))
         return results
 
+    def get_node(self, node_id: str) -> Node | None:
+        if node_id not in self.g:
+            return None
+        data = self.g.nodes[node_id]
+        return Node(
+            id=node_id,
+            type=data.get("type", ""),
+            label=data.get("label", node_id),
+            subgraph=data.get("subgraph", "customer"),
+            properties=data.get("properties", {})
+        )
+
+    def multi_hop(self, seed_ids: list[str], hops: int = 1) -> set[str]:
+        visited = set()
+        for s in seed_ids:
+            visited.update(self.get_neighbors(s, radius=hops))
+        return visited
 
     def get_neighbors(self, node_id: str, radius: int = 1) -> list[str]:
 
