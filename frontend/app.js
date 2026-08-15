@@ -253,7 +253,22 @@ function initCytoscape() {
     });
   });
 
+  if (typeof cytoscape === 'undefined') {
+    console.warn("Cytoscape.js not loaded, falling back to D3 force layout");
+    drawD3Fallback(fullGraphData.nodes.slice(0, 100), fullGraphData.edges.slice(0, 200));
+    return;
+  }
+
   if (cy) cy.destroy();
+
+  const layoutOpts = {
+    cose: { name: 'cose', animate: false, fit: true, padding: 30, randomize: true, idealEdgeLength: 40 },
+    dagre: { name: 'dagre', rankDir: 'TB', animate: false, padding: 30 },
+    circle: { name: 'circle', animate: false, padding: 30 },
+    concentric: { name: 'concentric', animate: false, padding: 30 },
+  };
+
+  const selectedLayout = layoutOpts[currentLayoutName] || layoutOpts['cose'];
 
   cy = cytoscape({
     container: cyContainer,
@@ -310,11 +325,7 @@ function initCytoscape() {
         }
       }
     ],
-    layout: {
-      name: currentLayoutName,
-      animate: false,
-      padding: 30,
-    }
+    layout: selectedLayout
   });
 
   cy.on('tap', 'node', evt => inspectNode(evt.target));
@@ -324,6 +335,40 @@ function initCytoscape() {
   });
 
   applyGraphFilters();
+}
+
+function drawD3Fallback(nodes, edges) {
+  const svgEl = document.getElementById('graph-svg');
+  if (!svgEl) return;
+  svgEl.style.display = 'block';
+  const width = svgEl.clientWidth || 800;
+  const height = svgEl.clientHeight || 480;
+  const svg = d3.select('#graph-svg');
+  svg.selectAll('*').remove();
+
+  const simNodes = nodes.map(n => ({ ...n }));
+  const simLinks = edges.map(e => ({ ...e }));
+
+  const sim = d3.forceSimulation(simNodes)
+    .force('link', d3.forceLink(simLinks).id(d => d.id).distance(70).strength(0.4))
+    .force('charge', d3.forceManyBody().strength(-140))
+    .force('center', d3.forceCenter(width / 2, height / 2));
+
+  const link = svg.append('g').selectAll('line')
+    .data(simLinks).join('line')
+    .attr('stroke', 'rgba(148,163,196,0.25)')
+    .attr('stroke-width', 1);
+
+  const node = svg.append('g').selectAll('circle')
+    .data(simNodes).join('circle')
+    .attr('r', 8)
+    .attr('fill', d => NODE_COLORS[d.type] || '#888');
+
+  sim.on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('cx', d => d.x).attr('cy', d => d.y);
+  });
 }
 
 function applyGraphFilters() {

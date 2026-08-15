@@ -22,10 +22,16 @@ meeting notes).
 
 ## Running it
 
+**From project root:**
+```bash
+python run.py
+# OR
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+**From `backend/` directory:**
 ```bash
 cd backend
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-...   # optional — see note below
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
