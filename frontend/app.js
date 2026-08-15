@@ -281,6 +281,9 @@ function initCytoscape() {
   cy = cytoscape({
     container: cyContainer,
     elements: elements,
+    textureOnViewport: true,
+    pixelRatio: 'auto',
+    hideEdgesOnViewport: elements.length > 800,
     style: [
       {
         selector: 'node',
