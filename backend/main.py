@@ -148,6 +148,11 @@ def api_query(req: QueryRequest):
     }
 
 
+@app.get("/api/graph")
+def api_get_full_graph():
+    return STATE["engine"].get_full_graph()
+
+
 @app.get("/api/graph/stats")
 def api_graph_stats():
     return STATE["engine"].stats()

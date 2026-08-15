@@ -430,6 +430,44 @@ class GraphEngine:
                         })
         return {"nodes": nodes_out, "edges": edges_out}
 
+    def get_full_graph(self, max_nodes: int = 5000) -> dict:
+        nodes_out = []
+        node_ids_set = set()
+        for nid, data in self.g.nodes(data=True):
+            node_ids_set.add(nid)
+            nodes_out.append({
+                "id": str(nid),
+                "label": data.get("label", str(nid)),
+                "type": data.get("type", "Node"),
+                "subgraph": data.get("subgraph", "customer"),
+                "properties": data.get("properties", {}),
+            })
+            if len(nodes_out) >= max_nodes:
+                break
+
+        edges_out = []
+        seen_edges = set()
+        edge_idx = 1
+        for u, v, data in self.g.edges(data=True):
+            if u in node_ids_set and v in node_ids_set:
+                rel_type = data.get("type", "CONNECTED_TO")
+                key = (u, v, rel_type)
+                if key not in seen_edges:
+                    seen_edges.add(key)
+                    edges_out.append({
+                        "id": f"rel_{edge_idx}",
+                        "source": str(u),
+                        "target": str(v),
+                        "type": rel_type,
+                        "properties": data.get("properties", {}),
+                    })
+                    edge_idx += 1
+
+        return {
+            "nodes": nodes_out,
+            "edges": edges_out,
+        }
+
     def stats(self) -> dict:
         return self.get_stats()
 

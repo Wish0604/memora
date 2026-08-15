@@ -12,6 +12,7 @@ document.querySelectorAll('.rail-tab').forEach(tab => {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('is-active'));
     tab.classList.add('is-active');
     document.getElementById('view-' + tab.dataset.tab).classList.add('is-active');
+    if (tab.dataset.tab === 'graph') loadFullGraph();
     if (tab.dataset.tab === 'contradictions') loadContradictions();
     if (tab.dataset.tab === 'docs') loadDocsTab();
     if (tab.dataset.tab === 'analytics') loadAnalytics();
@@ -133,79 +134,372 @@ document.querySelectorAll('[data-demo]').forEach(btn => {
   });
 });
 
-// ============================= Graph explorer (D3) =============================
-async function renderGraphExplorer(nodeIds) {
-  document.getElementById('graph-empty').style.display = 'none';
-  const capped = nodeIds.slice(0, 60);
-  const res = await fetch(`${API_BASE}/api/graph/subgraph`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ node_ids: capped }),
+// ============================= Full KG Interactive Graph Module (Cytoscape.js) =============================
+let cy = null;
+let fullGraphData = { nodes: [], edges: [] };
+let activeNodeTypes = new Set();
+let activeRelTypes = new Set();
+let currentLayoutName = 'cose';
+
+const NODE_SHAPES = {
+  Account: 'ellipse',
+  Person: 'ellipse',
+  Issue: 'diamond',
+  Feature: 'hexagon',
+  FeatureRequest: 'round-rectangle',
+  Task: 'rectangle',
+  MeetingNote: 'barrel',
+  Plan: 'tag',
+  DocPage: 'round-tag',
+  ReleaseNote: 'pentagon',
+  Version: 'star',
+};
+
+async function loadFullGraph() {
+  const statBadge = document.getElementById('kg-stat-badge');
+  const emptyEl = document.getElementById('graph-empty');
+  if (emptyEl) emptyEl.style.display = 'block';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/graph`);
+    fullGraphData = await res.json();
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    if (statBadge) {
+      statBadge.textContent = `${fullGraphData.nodes.length} Nodes · ${fullGraphData.edges.length} Edges`;
+    }
+
+    // Extract unique node & rel types
+    const nodeTypes = [...new Set(fullGraphData.nodes.map(n => n.type))].sort();
+    const relTypes = [...new Set(fullGraphData.edges.map(e => e.type))].sort();
+
+    activeNodeTypes = new Set(nodeTypes);
+    activeRelTypes = new Set(relTypes);
+
+    populateFilterCheckboxes(nodeTypes, relTypes);
+    initCytoscape();
+  } catch (err) {
+    if (emptyEl) emptyEl.textContent = `Failed to load Knowledge Graph: ${err}`;
+  }
+}
+
+function populateFilterCheckboxes(nodeTypes, relTypes) {
+  const nodeContainer = document.getElementById('kg-node-filters');
+  const relContainer = document.getElementById('kg-rel-filters');
+
+  if (nodeContainer) {
+    const counts = {};
+    fullGraphData.nodes.forEach(n => counts[n.type] = (counts[n.type] || 0) + 1);
+    nodeContainer.innerHTML = nodeTypes.map(t => `
+      <label class="kg-cb-item">
+        <span><input type="checkbox" class="kg-node-cb" value="${t}" checked> ${t}</span>
+        <span class="kg-count-badge">${counts[t] || 0}</span>
+      </label>`).join('');
+
+    nodeContainer.querySelectorAll('.kg-node-cb').forEach(cb => {
+      cb.addEventListener('change', e => {
+        if (e.target.checked) activeNodeTypes.add(e.target.value);
+        else activeNodeTypes.delete(e.target.value);
+        applyGraphFilters();
+      });
+    });
+  }
+
+  if (relContainer) {
+    const relCounts = {};
+    fullGraphData.edges.forEach(e => relCounts[e.type] = (relCounts[e.type] || 0) + 1);
+    relContainer.innerHTML = relTypes.map(t => `
+      <label class="kg-cb-item">
+        <span><input type="checkbox" class="kg-rel-cb" value="${t}" checked> ${t}</span>
+        <span class="kg-count-badge">${relCounts[t] || 0}</span>
+      </label>`).join('');
+
+    relContainer.querySelectorAll('.kg-rel-cb').forEach(cb => {
+      cb.addEventListener('change', e => {
+        if (e.target.checked) activeRelTypes.add(e.target.value);
+        else activeRelTypes.delete(e.target.value);
+        applyGraphFilters();
+      });
+    });
+  }
+}
+
+function initCytoscape() {
+  const cyContainer = document.getElementById('cy');
+  if (!cyContainer) return;
+
+  const elements = [];
+  fullGraphData.nodes.forEach(n => {
+    elements.push({
+      data: {
+        id: n.id,
+        label: n.label,
+        type: n.type,
+        subgraph: n.subgraph,
+        properties: n.properties,
+      }
+    });
   });
-  const { nodes, edges } = await res.json();
-  drawGraph(nodes, edges);
-  renderLegend(nodes);
+
+  fullGraphData.edges.forEach(e => {
+    elements.push({
+      data: {
+        id: e.id || `${e.source}_${e.target}`,
+        source: e.source,
+        target: e.target,
+        type: e.type,
+        properties: e.properties || {},
+      }
+    });
+  });
+
+  if (cy) cy.destroy();
+
+  cy = cytoscape({
+    container: cyContainer,
+    elements: elements,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'font-size': '10px',
+          'color': '#cbd5e1',
+          'font-family': 'Inter, sans-serif',
+          'text-valign': 'bottom',
+          'text-margin-y': 4,
+          'width': 22,
+          'height': 22,
+          'background-color': ele => NODE_COLORS[ele.data('type')] || '#94a3b8',
+          'shape': ele => NODE_SHAPES[ele.data('type')] || 'ellipse',
+          'border-width': 1.5,
+          'border-color': '#0f172a',
+        }
+      },
+      {
+        selector: 'node[type = "Account"]',
+        style: { 'width': 30, 'height': 30, 'font-weight': 'bold', 'font-size': '11px', 'color': '#5eead4' }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.2,
+          'line-color': 'rgba(148, 163, 184, 0.25)',
+          'target-arrow-color': 'rgba(148, 163, 184, 0.4)',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'font-size': '8px',
+          'color': '#64748b',
+        }
+      },
+      {
+        selector: ':selected',
+        style: {
+          'border-width': 3,
+          'border-color': '#38bdf8',
+          'line-color': '#38bdf8',
+          'target-arrow-color': '#38bdf8',
+        }
+      },
+      {
+        selector: '.highlighted',
+        style: {
+          'border-width': 3,
+          'border-color': '#f59e0b',
+          'background-color': '#f59e0b',
+        }
+      }
+    ],
+    layout: {
+      name: currentLayoutName,
+      animate: false,
+      padding: 30,
+    }
+  });
+
+  cy.on('tap', 'node', evt => inspectNode(evt.target));
+  cy.on('tap', 'edge', evt => inspectEdge(evt.target));
+  cy.on('tap', evt => {
+    if (evt.target === cy) closeInspector();
+  });
+
+  applyGraphFilters();
 }
 
-function renderLegend(nodes) {
-  const types = [...new Set(nodes.map(n => n.type))];
-  const legend = document.getElementById('graph-legend');
-  legend.innerHTML = types.map(t => `
-    <div class="legend-item"><span class="legend-dot" style="background:${NODE_COLORS[t] || '#888'}"></span>${t}</div>
-  `).join('');
-}
-
-function drawGraph(nodes, edges) {
-  const svgEl = document.getElementById('graph-svg');
-  const width = svgEl.clientWidth || 800;
-  const height = svgEl.clientHeight || 480;
-  const svg = d3.select('#graph-svg');
-  svg.selectAll('*').remove();
-
-  const simNodes = nodes.map(n => ({ ...n }));
-  const simLinks = edges.map(e => ({ ...e }));
-
-  const sim = d3.forceSimulation(simNodes)
-    .force('link', d3.forceLink(simLinks).id(d => d.id).distance(70).strength(0.4))
-    .force('charge', d3.forceManyBody().strength(-140))
-    .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collide', d3.forceCollide(20));
-
-  const link = svg.append('g').selectAll('line')
-    .data(simLinks).join('line')
-    .attr('stroke', 'rgba(148,163,196,0.25)')
-    .attr('stroke-width', 1);
-
-  const node = svg.append('g').selectAll('circle')
-    .data(simNodes).join('circle')
-    .attr('r', d => d.type === 'Account' ? 9 : 6)
-    .attr('fill', d => NODE_COLORS[d.type] || '#888')
-    .attr('stroke', '#0b0f1a')
-    .attr('stroke-width', 1.5)
-    .style('filter', d => `drop-shadow(0 0 4px ${NODE_COLORS[d.type] || '#888'})`)
-    .call(d3.drag()
-      .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-      .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
-
-  node.append('title').text(d => `${d.type}: ${d.label}`);
-
-  const label = svg.append('g').selectAll('text')
-    .data(simNodes).join('text')
-    .text(d => d.label.length > 22 ? d.label.slice(0, 22) + '…' : d.label)
-    .attr('font-size', 9)
-    .attr('fill', '#9aa3bf')
-    .attr('font-family', 'JetBrains Mono, monospace')
-    .attr('dx', 10)
-    .attr('dy', 3);
-
-  sim.on('tick', () => {
-    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-    node.attr('cx', d => d.x).attr('cy', d => d.y);
-    label.attr('x', d => d.x).attr('y', d => d.y);
+function applyGraphFilters() {
+  if (!cy) return;
+  cy.batch(() => {
+    cy.nodes().forEach(node => {
+      const type = node.data('type');
+      if (activeNodeTypes.has(type)) node.show();
+      else node.hide();
+    });
+    cy.edges().forEach(edge => {
+      const type = edge.data('type');
+      const srcVisible = activeNodeTypes.has(edge.source().data('type'));
+      const tgtVisible = activeNodeTypes.has(edge.target().data('type'));
+      if (activeRelTypes.has(type) && srcVisible && tgtVisible) edge.show();
+      else edge.hide();
+    });
   });
 }
+
+function inspectNode(nodeEle) {
+  const d = nodeEle.data();
+  const props = d.properties || {};
+  const inspType = document.getElementById('insp-type');
+  const inspBody = document.getElementById('insp-body');
+
+  if (inspType) inspType.textContent = `${d.type} Node`;
+
+  // Find connected edges
+  const connectedEdges = nodeEle.connectedEdges();
+  let relsHtml = '';
+  if (connectedEdges.length) {
+    relsHtml = `
+      <div class="insp-section-title">Relationships (${connectedEdges.length})</div>
+      <div style="max-height:160px; overflow-y:auto;">
+        ${connectedEdges.map(edge => {
+          const ed = edge.data();
+          const otherNode = edge.source().id() === d.id ? edge.target() : edge.source();
+          const isSrc = edge.source().id() === d.id;
+          return `
+            <div class="insp-edge-item">
+              <span>${isSrc ? '→' : '←'} <b>${escapeHtml(ed.type)}</b> ${escapeHtml(otherNode.data('label'))}</span>
+              <span class="kg-count-badge">${escapeHtml(otherNode.data('type'))}</span>
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  let propsGrid = Object.entries(props)
+    .filter(([k]) => !['content_hash', 'ingested_at'].includes(k))
+    .map(([k, v]) => `
+      <div class="insp-prop-row">
+        <span class="insp-prop-key">${escapeHtml(k)}</span>
+        <span class="insp-prop-val">${escapeHtml(Array.isArray(v) ? v.join(', ') : String(v))}</span>
+      </div>`).join('');
+
+  if (inspBody) {
+    inspBody.innerHTML = `
+      <div class="insp-title">${escapeHtml(d.label)}</div>
+      <div style="margin-bottom:12px; font-family:var(--font-mono); font-size:11px; color:var(--text-faint);">ID: ${escapeHtml(d.id)}</div>
+      
+      <div class="insp-prop-grid">
+        ${propsGrid || '<div class="inspector-placeholder">No extra properties</div>'}
+      </div>
+
+      ${relsHtml}
+
+      <div style="margin-top:16px;">
+        <button class="kg-btn-sub" id="insp-focus-btn" style="width:100%; padding:8px;">🎯 Focus & Show Neighborhood</button>
+      </div>`;
+
+    document.getElementById('insp-focus-btn').addEventListener('click', () => {
+      cy.nodes().removeClass('highlighted');
+      nodeEle.addClass('highlighted');
+      nodeEle.neighborhood().nodes().addClass('highlighted');
+      cy.animate({
+        center: { eles: nodeEle.union(nodeEle.neighborhood()) },
+        zoom: 1.5,
+        duration: 400
+      });
+    });
+  }
+}
+
+function inspectEdge(edgeEle) {
+  const d = edgeEle.data();
+  const src = edgeEle.source().data();
+  const tgt = edgeEle.target().data();
+  const inspType = document.getElementById('insp-type');
+  const inspBody = document.getElementById('insp-body');
+
+  if (inspType) inspType.textContent = `Relationship: ${d.type}`;
+
+  if (inspBody) {
+    inspBody.innerHTML = `
+      <div class="insp-title">${escapeHtml(d.type)}</div>
+      
+      <div class="insp-prop-grid">
+        <div class="insp-prop-row">
+          <span class="insp-prop-key">Source</span>
+          <span class="insp-prop-val">${escapeHtml(src.label)} (${escapeHtml(src.type)})</span>
+        </div>
+        <div class="insp-prop-row">
+          <span class="insp-prop-key">Target</span>
+          <span class="insp-prop-val">${escapeHtml(tgt.label)} (${escapeHtml(tgt.type)})</span>
+        </div>
+        ${Object.entries(d.properties || {}).map(([k, v]) => `
+          <div class="insp-prop-row">
+            <span class="insp-prop-key">${escapeHtml(k)}</span>
+            <span class="insp-prop-val">${escapeHtml(String(v))}</span>
+          </div>`).join('')}
+      </div>`;
+  }
+}
+
+function closeInspector() {
+  const inspBody = document.getElementById('insp-body');
+  if (inspBody) {
+    inspBody.innerHTML = '<div class="inspector-placeholder">Click any node or edge in the Knowledge Graph to inspect properties, relationships, and source provenance.</div>';
+  }
+}
+
+// Controls wiring
+document.addEventListener('DOMContentLoaded', () => {
+  const searchInput = document.getElementById('kg-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', e => {
+      const query = e.target.value.trim().toLowerCase();
+      if (!cy) return;
+      cy.nodes().removeClass('highlighted');
+      if (!query) return;
+
+      const matches = cy.nodes().filter(node => {
+        return node.data('label').toLowerCase().includes(query) || node.data('id').toLowerCase().includes(query);
+      });
+
+      if (matches.length) {
+        matches.addClass('highlighted');
+        cy.animate({ center: { eles: matches }, duration: 300 });
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-layout]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      document.querySelectorAll('[data-layout]').forEach(b => b.classList.remove('is-active'));
+      e.target.classList.add('is-active');
+      currentLayoutName = e.target.dataset.layout;
+      if (cy) {
+        const layout = cy.layout({ name: currentLayoutName, animate: true, animationDuration: 400 });
+        layout.run();
+      }
+    });
+  });
+
+  const fitBtn = document.getElementById('kg-fit-btn');
+  if (fitBtn) fitBtn.addEventListener('click', () => { if (cy) cy.fit(padding = 30); });
+
+  const resetBtn = document.getElementById('kg-reset-filters-btn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      document.querySelectorAll('.kg-node-cb, .kg-rel-cb').forEach(cb => cb.checked = true);
+      if (cy) {
+        activeNodeTypes = new Set(fullGraphData.nodes.map(n => n.type));
+        activeRelTypes = new Set(fullGraphData.edges.map(e => e.type));
+        applyGraphFilters();
+      }
+    });
+  }
+
+  const refreshBtn = document.getElementById('kg-refresh-btn');
+  if (refreshBtn) refreshBtn.addEventListener('click', loadFullGraph);
+
+  const inspClose = document.getElementById('insp-close');
+  if (inspClose) inspClose.addEventListener('click', closeInspector);
+});
 
 // ============================= Contradictions =============================
 async function loadContradictions() {

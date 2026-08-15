@@ -6,6 +6,9 @@
 <title>Meridian — Graph Knowledge-Base Agent</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.5.0/cytoscape-dagre.js"></script>
 </head>
 <body>
 
@@ -86,17 +89,73 @@
       </div>
     </section>
 
-    <!-- ---- Graph Explorer ---- -->
+    <!-- ---- Full KG Interactive Graph Explorer ---- -->
     <section class="view" id="view-graph">
-      <header class="view-head">
-        <h1>Retrieval path visualizer</h1>
-        <p>The subgraph touched by your most recent query — traversal shown live from the graph engine.</p>
+      <header class="view-head graph-head-row">
+        <div>
+          <h1>Interactive Full Knowledge Graph</h1>
+          <p>Read-only visualizer into the complete persisted Neo4j / Dual Graph Engine (<span id="kg-stat-badge">Loading stats...</span>)</p>
+        </div>
+        <div class="head-actions">
+          <span class="status-indicator"><span class="dot dot-live"></span> Connected</span>
+          <button class="action-btn" id="kg-refresh-btn">↻ Refresh Graph</button>
+        </div>
       </header>
-      <div class="panel graph-panel">
-        <svg id="graph-svg"></svg>
-        <div class="graph-empty" id="graph-empty">Run a query in <b>Ask</b> to populate the retrieval graph.</div>
+
+      <div class="kg-module-grid">
+        <!-- Left Controls Sidebar -->
+        <aside class="kg-sidebar">
+          <div class="kg-control-group">
+            <label class="kg-label">Search Graph</label>
+            <input type="text" id="kg-search-input" class="kg-input" placeholder="Search node or ID..." autocomplete="off">
+          </div>
+
+          <div class="kg-control-group">
+            <label class="kg-label">Layout</label>
+            <div class="kg-btn-group">
+              <button class="kg-btn is-active" data-layout="cose">Force</button>
+              <button class="kg-btn" data-layout="dagre">Hierarchy</button>
+              <button class="kg-btn" data-layout="circle">Circular</button>
+            </div>
+            <div class="kg-btn-row">
+              <button class="kg-btn-sub" id="kg-fit-btn">Fit Graph</button>
+              <button class="kg-btn-sub" id="kg-reset-filters-btn">Reset Filters</button>
+            </div>
+          </div>
+
+          <div class="kg-control-group">
+            <label class="kg-label">Node Types</label>
+            <div class="kg-checkbox-list" id="kg-node-filters">
+              <!-- Checkboxes dynamically populated -->
+            </div>
+          </div>
+
+          <div class="kg-control-group">
+            <label class="kg-label">Relationships</label>
+            <div class="kg-checkbox-list" id="kg-rel-filters">
+              <!-- Checkboxes dynamically populated -->
+            </div>
+          </div>
+        </aside>
+
+        <!-- Center Interactive Canvas -->
+        <div class="kg-canvas-wrapper panel">
+          <div id="cy" class="cy-canvas"></div>
+          <svg id="graph-svg" style="display:none;"></svg>
+          <div class="graph-empty" id="graph-empty" style="display:none;">Loading Knowledge Graph...</div>
+        </div>
+
+        <!-- Right Inspector Drawer -->
+        <aside class="kg-inspector panel" id="kg-inspector">
+          <div class="inspector-header">
+            <span class="inspector-type-badge" id="insp-type">Node Inspector</span>
+            <button class="inspector-close" id="insp-close">×</button>
+          </div>
+          <div class="inspector-body" id="insp-body">
+            <div class="inspector-placeholder">Click any node or edge in the Knowledge Graph to inspect properties, relationships, and source provenance.</div>
+          </div>
+        </aside>
       </div>
-      <div class="legend" id="graph-legend"></div>
     </section>
 
     <!-- ---- Contradictions ---- -->
