@@ -138,23 +138,23 @@
           </div>
         </aside>
 
-        <!-- Center Interactive Canvas -->
+        <!-- Center Interactive Canvas (Expanded Remaining Area) -->
         <div class="kg-canvas-wrapper panel">
           <div id="cy" class="cy-canvas"></div>
           <svg id="graph-svg" style="display:none;"></svg>
           <div class="graph-empty" id="graph-empty" style="display:none;">Loading Knowledge Graph...</div>
-        </div>
 
-        <!-- Right Inspector Drawer -->
-        <aside class="kg-inspector panel" id="kg-inspector">
-          <div class="inspector-header">
-            <span class="inspector-type-badge" id="insp-type">Node Inspector</span>
-            <button class="inspector-close" id="insp-close">×</button>
-          </div>
-          <div class="inspector-body" id="insp-body">
-            <div class="inspector-placeholder">Click any node or edge in the Knowledge Graph to inspect properties, relationships, and source provenance.</div>
-          </div>
-        </aside>
+          <!-- Floating Node/Edge Inspector Drawer (Opens on Click Only) -->
+          <aside class="kg-inspector panel" id="kg-inspector">
+            <div class="inspector-header">
+              <span class="inspector-type-badge" id="insp-type">Node Inspector</span>
+              <button class="inspector-close" id="insp-close">×</button>
+            </div>
+            <div class="inspector-body" id="insp-body">
+              <div class="inspector-placeholder">Click any node or edge in the Knowledge Graph to inspect properties, relationships, and source provenance.</div>
+            </div>
+          </aside>
+        </div>
       </div>
     </section>
 

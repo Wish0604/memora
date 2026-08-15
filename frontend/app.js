@@ -404,6 +404,9 @@ function applyGraphFilters() {
 }
 
 function inspectNode(nodeEle) {
+  const inspector = document.getElementById('kg-inspector');
+  if (inspector) inspector.classList.add('is-active');
+
   const d = nodeEle.data();
   const props = d.properties || {};
   const inspType = document.getElementById('insp-type');
@@ -468,6 +471,9 @@ function inspectNode(nodeEle) {
 }
 
 function inspectEdge(edgeEle) {
+  const inspector = document.getElementById('kg-inspector');
+  if (inspector) inspector.classList.add('is-active');
+
   const d = edgeEle.data();
   const src = edgeEle.source().data();
   const tgt = edgeEle.target().data();
@@ -499,6 +505,8 @@ function inspectEdge(edgeEle) {
 }
 
 function closeInspector() {
+  const inspector = document.getElementById('kg-inspector');
+  if (inspector) inspector.classList.remove('is-active');
   const inspBody = document.getElementById('insp-body');
   if (inspBody) {
     inspBody.innerHTML = '<div class="inspector-placeholder">Click any node or edge in the Knowledge Graph to inspect properties, relationships, and source provenance.</div>';

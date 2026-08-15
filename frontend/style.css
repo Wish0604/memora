@@ -188,7 +188,7 @@ button, input { font-family: inherit; }
 
 .kg-module-grid {
   display: grid;
-  grid-template-columns: 240px 1fr 300px;
+  grid-template-columns: 240px 1fr;
   gap: 16px;
   height: calc(100vh - 170px);
   min-height: 520px;
@@ -227,14 +227,38 @@ button, input { font-family: inherit; }
 .kg-cb-item input { margin-right: 6px; accent-color: var(--accent-cyan); }
 .kg-count-badge { font-family: var(--font-mono); font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 8px; color: var(--text-faint); }
 
-/* Center Canvas */
-.kg-canvas-wrapper { position: relative; padding: 0; overflow: hidden; height: 100%; }
+/* Center Canvas - Takes 100% of remaining area */
+.kg-canvas-wrapper { position: relative; padding: 0; overflow: hidden; height: 100%; width: 100%; }
 .cy-canvas { width: 100%; height: 100%; background: #07090e; }
 
-/* Right Inspector */
+/* Floating Overlay Node Inspector Drawer (Opens on Click Only) */
 .kg-inspector {
-  display: flex; flex-direction: column; padding: 16px; overflow-y: auto; height: 100%;
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  bottom: 16px;
+  width: 320px;
+  max-width: calc(100% - 32px);
+  background: rgba(18, 23, 41, 0.95);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: -10px 0 30px rgba(0,0,0,0.6);
+  backdrop-filter: blur(20px);
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  padding: 16px;
+  overflow-y: auto;
 }
+.kg-inspector.is-active {
+  display: flex;
+  animation: slideInRight 0.2s ease-out;
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 .inspector-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .inspector-type-badge { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; color: var(--accent-cyan); letter-spacing: 0.05em; font-weight: 600; }
 .inspector-close { background: transparent; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; }
