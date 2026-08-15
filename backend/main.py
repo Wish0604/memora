@@ -231,8 +231,8 @@ def api_graph_version():
 
 
 @app.get("/api/graph")
-def api_get_full_graph():
-    return STATE["engine"].get_full_graph()
+def api_get_full_graph(limit: int = 400):
+    return STATE["engine"].get_full_graph(max_nodes=limit)
 
 
 @app.get("/api/graph/stats")

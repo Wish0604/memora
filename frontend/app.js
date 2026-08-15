@@ -148,6 +148,7 @@ let fullGraphData = { nodes: [], edges: [] };
 let activeNodeTypes = new Set();
 let activeRelTypes = new Set();
 let currentLayoutName = 'cose';
+let currentGraphLimit = 400;
 
 const NODE_SHAPES = {
   Account: 'ellipse',
@@ -163,18 +164,20 @@ const NODE_SHAPES = {
   Version: 'star',
 };
 
-async function loadFullGraph() {
+async function loadFullGraph(limit = currentGraphLimit) {
+  currentGraphLimit = limit;
   const statBadge = document.getElementById('kg-stat-badge');
   const emptyEl = document.getElementById('graph-empty');
   if (emptyEl) emptyEl.style.display = 'block';
 
   try {
-    const res = await fetch(`${API_BASE}/api/graph`);
+    const res = await fetch(`${API_BASE}/api/graph?limit=${limit}`);
     fullGraphData = await res.json();
     if (emptyEl) emptyEl.style.display = 'none';
 
     if (statBadge) {
-      statBadge.textContent = `${fullGraphData.nodes.length} Nodes · ${fullGraphData.edges.length} Edges`;
+      const totalStr = fullGraphData.total_nodes_in_store ? ` (of ${fullGraphData.total_nodes_in_store} total)` : '';
+      statBadge.textContent = `${fullGraphData.nodes.length} Nodes · ${fullGraphData.edges.length} Edges${totalStr}`;
     }
 
     // Extract unique node & rel types
@@ -270,7 +273,7 @@ function initCytoscape() {
   if (cy) cy.destroy();
 
   const layoutOpts = {
-    cose: { name: 'cose', animate: false, fit: true, padding: 30, randomize: true, idealEdgeLength: 40 },
+    cose: { name: 'cose', animate: false, fit: true, padding: 30, randomize: false, numIter: 300, idealEdgeLength: 35 },
     dagre: { name: 'dagre', rankDir: 'TB', animate: false, padding: 30 },
     circle: { name: 'circle', animate: false, padding: 30 },
     concentric: { name: 'concentric', animate: false, padding: 30 },
@@ -655,6 +658,13 @@ async function loadAnalytics() {
 
 // ============================= Init & SSE =============================
 function initSSE() {
+  window.addEventListener('resize', () => {
+    if (cy) {
+      cy.resize();
+      cy.fit(30);
+    }
+  });
+
   if (window.EventSource) {
     const sse = new EventSource(`${API_BASE}/api/graph/events`);
     sse.onmessage = (evt) => {

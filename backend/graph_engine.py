@@ -461,10 +461,15 @@ class GraphEngine:
     def has_node(self, node_id: str) -> bool:
         return node_id in self.g
 
-    def get_full_graph(self, max_nodes: int = 5000) -> dict:
+    def get_full_graph(self, max_nodes: int = 400) -> dict:
         nodes_out = []
         node_ids_set = set()
-        for nid, data in self.g.nodes(data=True):
+
+        # Sort nodes by priority: Account, Feature, Plan, ReleaseNote, FeatureRequest, Issue, Task, MeetingNote, DocPage
+        priority = {"Account": 0, "Feature": 1, "Plan": 2, "ReleaseNote": 3, "FeatureRequest": 4, "Issue": 5, "Task": 6, "MeetingNote": 7, "DocPage": 8}
+        sorted_nodes = sorted(self.g.nodes(data=True), key=lambda x: priority.get(x[1].get("type"), 99))
+
+        for nid, data in sorted_nodes:
             node_ids_set.add(nid)
             nodes_out.append({
                 "id": str(nid),
@@ -473,7 +478,7 @@ class GraphEngine:
                 "subgraph": data.get("subgraph", "customer"),
                 "properties": data.get("properties", {}),
             })
-            if len(nodes_out) >= max_nodes:
+            if max_nodes > 0 and len(nodes_out) >= max_nodes:
                 break
 
         edges_out = []
@@ -497,6 +502,7 @@ class GraphEngine:
         return {
             "nodes": nodes_out,
             "edges": edges_out,
+            "total_nodes_in_store": len(self.g),
         }
 
     def stats(self) -> dict:
